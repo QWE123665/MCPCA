@@ -18,7 +18,7 @@ for i in range(len(Nlist)):
     X_list.append(X)
 
 model = mcpca.MCPCA(n_components = None, rank_range = [1,2,3,4])
-model.fit(X_list)
+model.fit(X_list,plot_B = True)
 Z_list = model.transform(X_list, return_list=True)
 print("Ascore:")
 print(similarity_measures(model.components_,A)[0])
