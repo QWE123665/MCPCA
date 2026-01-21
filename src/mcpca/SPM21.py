@@ -1,0 +1,231 @@
+import numpy as np
+from .myutils import khatri_rao_power, khatri_rao_product, \
+    option_parser, compiler_decorator, prange, pos, isbool, \
+    dormqr, lapack, norm
+from scipy.linalg import svd
+from time import time
+from math import sqrt
+
+
+
+@compiler_decorator
+def power_method_iteration(Vt, maxiter, gradtol, Ak, Bk):
+
+    r = Vt.shape[0]
+    m = Ak.shape[0]
+    n = Bk.shape[0]
+    V_B = Vt.reshape(r * m, n)
+    V_C = Vt.reshape(r, m * n)
+    
+    for iter in range(maxiter):
+        
+        VBk = np.dot(V_B, Bk).reshape(r, m)
+        Ck = np.dot(VBk, Ak)
+        Ak_new = np.dot(Ck, VBk)
+        
+        f = np.dot(Ak, Ak_new)
+        
+        Ak = Ak_new / norm(Ak_new)
+        
+        VCk = np.dot(Ck, V_C).reshape(m, n)
+        Bk_new = np.dot(Ak, VCk)
+
+        Bk_new /= norm(Bk_new)
+        err = norm(Bk - Bk_new)
+        Bk = Bk_new
+
+        if err < gradtol:
+            # Algorithm converged
+            break
+        
+    return Ak, Bk, iter, err, f
+
+    
+def spm_21sym(T, r=None, **kwargs):
+    """
+    Decompose symmetric even order tensor using subspace power method.
+
+    Parameters:
+        T (ndarray): Tensor of dimension L^n.
+        R (int, optional): Tensor rank. If not provided, it will be estimated.
+        kwargs: Various SPM options as key-value pairs.
+            maxiter (int): Maximum number of iterations of power method (default: 5000).
+            ntries (int): Maximum number of tries for initialization (default: 5).
+            gradtol (float): Gradient tolerance (default: 1e-15).
+            ranksel (float): Tolerance for selecting the rank of T (default: 1e-4).
+            ftol (float): Function value tolerance for restarting (default: 1e-2).
+
+    Returns:
+        A (ndarray): L x R matrix where the columns are the rank decomposition of T.
+        B (ndarray): Scaling factors.
+        stat (dict): Various statistics of SPM.
+    """
+
+    opts = option_parser(kwargs,
+                         ('maxiter', 5000, pos),
+                         ('ntries', 3, pos),
+                         ('gradtol', 1e-14, pos),
+                         ('eigtol', 1e-8, pos),
+                         ('ftol', 1e-2, pos),
+                         ('w_out', True, isbool),
+                         ('return_stats', False, isbool),
+                         ('lsq_refine', None, None))
+
+    m_, m, n = T.shape
+    assert m_ == m, "Tensor T must be symmetric."
+
+    # Flatten T
+    T = T.reshape(m, -1)
+
+    # Perform SVD
+    U, D, Vt = svd(T, full_matrices=False)
+
+    # Determine tensor rank by the eigenvalues of mat(T)
+    if r is None:
+        r = D.shape[0] - np.searchsorted(D[::-1], opts.eigtol)
+
+    D1 = np.diag(1.0 / D[:r])
+    V = np.ascontiguousarray(Vt[:r, :]).T
+    U = U[:, :r]
+
+    A = np.zeros((m, r))
+    B = np.zeros((n, r))
+    l = np.zeros((r,))
+    
+    stats = []
+
+    for k in range(r):
+        
+        statsk = []
+        
+        for tries in range(opts.ntries):
+            # Initialize Ak and Bk
+            Ak = np.random.randn(m)
+            Ak /= norm(Ak)
+            Bk = np.random.randn(n)
+            Bk /= norm(Bk)
+
+            Ak, Bk, iter, err, f = power_method_iteration(V.T.reshape(r-k, m, n), opts.maxiter, opts.gradtol, Ak, Bk)
+
+            statsk.append(dict(niter=iter, err=err, f=f))
+
+            if 1 - f < opts.ftol:
+                break
+            elif tries == 0 or f > f_:
+                f_ = f
+                Ak_ = Ak
+                Bk_ = Bk
+            elif tries == opts.ntries - 1:
+                f = f_
+                Ak = Ak_
+                Bk = Bk_
+
+        statsk.sort(reverse=True, key=lambda stat: stat['f'])
+        stats.append(statsk)
+
+        alphaU = np.dot(Ak, U)
+        alphaV = np.dot((Ak.reshape(-1, 1) * Bk.reshape(1, -1)).reshape(-1), V)
+
+        # Solve for lambda
+        D1alphaU = np.dot(alphaU, D1)
+        D1alphaV = np.dot(D1, alphaV)
+        l[k] = norm(alphaU) * norm(alphaV) / np.dot(alphaV, D1alphaU)
+
+        if k < r-1:
+            # Update V and D using Householder reflection
+            # Calculate the new matrix D and the new subspace
+            # Use Householder reflection to update V and D
+            qr, tau, work, info = lapack.dgeqrf(D1alphaU, overwrite_a=1)
+            D1, work, info = dormqr('R', 'T', qr, tau, D1, overwrite_c=1)
+            V, work, info = dormqr('R', 'T', qr, tau, V, overwrite_c=1)
+
+            V = V[:, 1:]
+
+            qr, tau, work, info = lapack.dgeqrf(D1alphaV, overwrite_a=1)
+            D1, work, info = dormqr('L', 'N', qr, tau, D1, overwrite_c=1)
+            U, work, info = dormqr('R', 'T', qr, tau, U, overwrite_c=1)
+
+            D1 = D1[1:, 1:]
+            U = U[:, 1:]
+
+        A[:, k] = Ak
+        B[:, k] = Bk
+    
+    if opts.lsq_refine == "B":    
+        G = np.square(np.dot(A.T, A))
+        B = np.linalg.solve(G, np.dot(khatri_rao_power(A, 2).T, np.reshape(T, (-1, n)))).T
+    elif opts.lsq_refine == "lambda":
+        G = np.square(np.dot(A.T, A)) * np.dot(B.T, B)
+        Z = np.dot(np.reshape(T, (m, -1)), khatri_rao_product(A, B))
+        u = np.sum(A * Z, axis=0)
+        B *= np.expand_dims(np.linalg.solve(G, u), axis=0)
+    else:
+        B *= np.expand_dims(l, axis=0)
+    
+    if opts.return_stats:
+        return A, B, stats
+    else:
+        return A, B
+
+if __name__ == '__main__':
+    # Example usage
+
+    m = 100
+    n = 75
+    r = 50
+
+    A = np.random.randn(m, r)
+    B = np.random.randn(n, r)
+
+    T = np.dot(khatri_rao_power(A, 2), B.T).reshape(m, m, n)
+    
+    print("## Example 1 - Noiseless ##")
+    print(":: SPM ::")
+    start = time()
+    A_, B_, stats = spm_21sym(T, r=r, maxiter=1000, ntries=3,
+                       gradtol=1e-10, ftol=1e-5, return_stats=True)
+    print("Time taken:", time() - start)
+    T_ = np.dot(khatri_rao_power(A_, 2), B_.T).reshape(m, m, n)
+    print("Error:", np.linalg.norm(T.reshape(-1) -
+          T_.reshape(-1)) / np.linalg.norm(T.reshape(-1)))
+
+    print("\n## Example 2 - Noisy ##")
+    
+    A = np.random.randn(m, r)
+    B = np.random.randn(n, r)
+
+    T = np.dot(khatri_rao_power(A, 2), B.T).reshape(m, m, n)
+    T_noisy = T + 2 * np.random.randn(m, m, n) # Add noise
+    
+    print(":: SPM ::")
+    start = time()
+    A_, B_, stats = spm_21sym(T_noisy, r=r, maxiter=5000, ntries=3,
+                       gradtol=1e-10, ftol=1e-1, return_stats=True)
+    print("Time taken:", time() - start)
+    T_ = np.dot(khatri_rao_power(A_, 2), B_.T).reshape(m, m, n)
+    print("Error:", np.linalg.norm(T.reshape(-1) -
+          T_.reshape(-1)) / np.linalg.norm(T.reshape(-1)))
+    
+    print(":: SPM (lambda lsq refine) ::")
+    start = time()
+    A_, B_, stats = spm_21sym(T_noisy, r=r, maxiter=5000, ntries=3,
+                       gradtol=1e-10, ftol=1e-1, return_stats=True, lsq_refine='lambda')
+    print("Time taken:", time() - start)
+    T_ = np.dot(khatri_rao_power(A_, 2), B_.T).reshape(m, m, n)
+    print("Error:", np.linalg.norm(T.reshape(-1) -
+          T_.reshape(-1)) / np.linalg.norm(T.reshape(-1)))
+    
+    print(":: SPM (B lsq refine) ::")
+    start = time()
+    A_, B_, stats = spm_21sym(T_noisy, r=r, maxiter=5000, ntries=3,
+                       gradtol=1e-10, ftol=1e-1, return_stats=True, lsq_refine='B')
+    print("Time taken:", time() - start)
+    T_ = np.dot(khatri_rao_power(A_, 2), B_.T).reshape(m, m, n)
+    print("Error:", np.linalg.norm(T.reshape(-1) -
+          T_.reshape(-1)) / np.linalg.norm(T.reshape(-1)))
+    
+
+    
+
+
+
