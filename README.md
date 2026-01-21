@@ -65,7 +65,7 @@ B = model.loadings_    # context loadings (B)
 
 The main sklearn-style entry point is `mcpca.MCPCA`. You pass in a list of context datasets, each a numpy array, fit the model, then optionally transform the data and visualize context loadings.
 
-A self-contained illustration of MCPCA on synthetic data is provided in `example/example.ipynb`.
+A synthetic data illustration is available at tests/test.py .
 
 ### 1. Prepare your data
 
