@@ -30,9 +30,9 @@ Given $k$ datasets sharing $p$ features, MCPCA learns the following objects.
 #### Shared components (MCPCs): matrix `A`
 
 The matrix
-$$
-A \in \mathbb{R}^{p \times r}
-$$
+
+![equation](https://latex.codecogs.com/svg.image?&space;A\in\mathbb{R}^{p\times&space;r})
+
 contains the **multi-context principal components (MCPCs)**. Each column of `A`
 is a feature-space direction shared across all contexts.
 
@@ -43,9 +43,9 @@ Unlike standard PCA:
 #### Context loadings: matrix `B`
 
 The matrix
-$$
-B \in \mathbb{R}^{k \times r}
-$$
+
+![equation](https://latex.codecogs.com/svg.image?&space;B\in\mathbb{R}^{k\times&space;r})
+
 encodes how strongly each shared component appears in each context
 
 Interpretation:
