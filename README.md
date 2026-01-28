@@ -176,6 +176,6 @@ If you use MCPCA in your research, please cite the associated paper:
 @article{mcpca2025,
   title={Multi-Context Principal Component Analysis},
   author={Kexin Wang, Salil Bhate, Jo\~ao M. Pereira, Joe Kileel, Matylda Figlerowicz, Anna Seigal},
-  journal = {},
+  journal = {arXiv preprint arXiv:2601.15239},
   year={2025}
 }
