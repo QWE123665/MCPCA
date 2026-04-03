@@ -75,7 +75,7 @@ The data in each context should be a 2D NumPy array of shape $(N_i, p)$ with the
 import numpy as np
 from mcpca import MCPCA
 
-# Example: two contexts
+# Example: three contexts
 X_list = [X1, X2, X3]
 ```
 
